@@ -255,29 +255,37 @@ def _sum_practice(out: Storage, a: Storage, size: int) -> None:
 
     """
     BLOCK_DIM = 32
-
+    
+    # Shared memory for block reduction
     cache = cuda.shared.array(BLOCK_DIM, numba.float64)
-    i = cuda.blockIdx.x * cuda.blockDim.x + cuda.threadIdx.x
-    pos = cuda.threadIdx.x
-
+    
+    # Calculate thread and block indices
+    tid = cuda.threadIdx.x
+    bid = cuda.blockIdx.x
+    
+    # Global index for loading data
+    i = bid * BLOCK_DIM + tid
+    
+    # Load data into shared memory
     if i < size:
-        cache[pos] = a[i]
+        cache[tid] = a[i]
     else:
-        cache[pos] = 0.0
-
+        cache[tid] = 0.0
+    
+    # Ensure all threads have loaded their data
     cuda.syncthreads()
-
-    stride = 1
-    while stride < BLOCK_DIM:
-        index = 2 * stride * pos
-        if index < BLOCK_DIM:
-            cache[index] += cache[index + stride]
-        stride *= 2
-
+    
+    # Parallel reduction in shared memory
+    s = BLOCK_DIM // 2
+    while s > 0:
+        if tid < s:
+            cache[tid] += cache[tid + s]
         cuda.syncthreads()
-
-    if pos == 0:
-        out[cuda.blockIdx.x] = cache[0]
+        s //= 2
+    
+    # Write result for this block to global memory
+    if tid == 0:
+        out[bid] = cache[0]
 
 
 jit_sum_practice = cuda.jit()(_sum_practice)
@@ -332,15 +340,12 @@ def tensor_reduce(
             to_index(out_pos, out_shape, out_index)
             o = index_to_position(out_index, out_strides)    
             if pos == 0:
-                out_index[reduce_dim] = 0
-                curr_pos = index_to_position(out_index, a_strides)
-                cache[0] = a_storage[curr_pos]
-                cuda.syncthreads()
+                acc = reduce_value
                 for s in range(reduce_size):
                     out_index[reduce_dim] = s
                     curr_pos = index_to_position(out_index, a_strides)
-                    cache[0] = fn(cache[0], a_storage[curr_pos])
-            out[o] = cache[0]
+                    acc = fn(cache[0], a_storage[curr_pos])
+            out[o] = acc
 
     return jit(_reduce)  # type: ignore
 
