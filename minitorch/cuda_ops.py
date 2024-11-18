@@ -173,8 +173,14 @@ def tensor_map(
         out_index = cuda.local.array(MAX_DIMS, numba.int32)
         in_index = cuda.local.array(MAX_DIMS, numba.int32)
         i = cuda.blockIdx.x * cuda.blockDim.x + cuda.threadIdx.x
-        # TODO: Implement for Task 3.3.
-        raise NotImplementedError("Need to implement for Task 3.3")
+        
+        if i < out_size:
+            to_index(i, out_shape, out_index)
+            broadcast_index(out_index, out_shape, in_shape, in_index)
+            in_position = index_to_position(in_index, in_strides)
+            out_position = index_to_position(out_index, out_strides)
+            out[out_position] = fn(in_storage[in_position])
+
 
     return cuda.jit()(_map)  # type: ignore
 
@@ -216,8 +222,13 @@ def tensor_zip(
         b_index = cuda.local.array(MAX_DIMS, numba.int32)
         i = cuda.blockIdx.x * cuda.blockDim.x + cuda.threadIdx.x
 
-        # TODO: Implement for Task 3.3.
-        raise NotImplementedError("Need to implement for Task 3.3")
+        to_index(i, out_shape, out_index)
+        o = index_to_position(out_index, out_strides)
+        broadcast_index(out_index, out_shape, a_shape, a_index)
+        broadcast_index(out_index, out_shape, b_shape, b_index)
+        a_pos = index_to_position(a_index, a_strides)
+        b_pos = index_to_position(b_index, b_strides)
+        out[o] = fn(a_storage[a_pos], b_storage[b_pos])
 
     return cuda.jit()(_zip)  # type: ignore
 
@@ -249,8 +260,24 @@ def _sum_practice(out: Storage, a: Storage, size: int) -> None:
     i = cuda.blockIdx.x * cuda.blockDim.x + cuda.threadIdx.x
     pos = cuda.threadIdx.x
 
-    # TODO: Implement for Task 3.3.
-    raise NotImplementedError("Need to implement for Task 3.3")
+    if i < size:
+        cache[pos] = a[i]
+    else:
+        cache[pos] = 0.0
+
+    cuda.syncthreads()
+
+    stride = 1
+    while stride < BLOCK_DIM:
+        index = 2 * stride * pos
+        if index < BLOCK_DIM:
+            cache[index] += cache[index + stride]
+        stride *= 2
+
+        cuda.syncthreads()
+
+    if pos == 0:
+        out[cuda.blockIdx.x] = cache[0]
 
 
 jit_sum_practice = cuda.jit()(_sum_practice)
@@ -298,10 +325,22 @@ def tensor_reduce(
         cache = cuda.shared.array(BLOCK_DIM, numba.float64)
         out_index = cuda.local.array(MAX_DIMS, numba.int32)
         out_pos = cuda.blockIdx.x
-        pos = cuda.threadIdx.x
+        pos = cuda.threadIdx.x # thread position in block 
+        reduce_size = a_shape[reduce_dim]
 
-        # TODO: Implement for Task 3.3.
-        raise NotImplementedError("Need to implement for Task 3.3")
+        if out_pos < out_size:
+            to_index(out_pos, out_shape, out_index)
+            o = index_to_position(out_index, out_strides)    
+            if pos == 0:
+                out_index[reduce_dim] = 0
+                curr_pos = index_to_position(out_index, a_strides)
+                cache[0] = a_storage[curr_pos]
+                cuda.syncthreads()
+                for s in range(reduce_size):
+                    out_index[reduce_dim] = s
+                    curr_pos = index_to_position(out_index, a_strides)
+                    cache[0] = fn(cache[0], a_storage[curr_pos])
+            out[o] = cache[0]
 
     return jit(_reduce)  # type: ignore
 
@@ -338,8 +377,26 @@ def _mm_practice(out: Storage, a: Storage, b: Storage, size: int) -> None:
 
     """
     BLOCK_DIM = 32
-    # TODO: Implement for Task 3.3.
-    raise NotImplementedError("Need to implement for Task 3.3")
+    shared_a = cuda.shared.array((BLOCK_DIM, BLOCK_DIM), numba.float32)
+    shared_b = cuda.shared.array((BLOCK_DIM, BLOCK_DIM), numba.float32)
+
+    tx = cuda.threadIdx.x
+    ty = cuda.threadIdx.y
+
+    row = cuda.blockIdx.y * cuda.blockDim.y + ty
+    col = cuda.blockIdx.x * cuda.blockDim.x + tx
+
+    temp = 0.0
+
+    for k in range(size):
+        shared_a[ty, tx] = a[row * size + k]
+        shared_b[ty, tx] = b[k * size + col]
+        cuda.syncthreads()
+        for n in range(BLOCK_DIM):
+            temp += shared_a[ty, n] * shared_b[n, tx]
+        cuda.syncthreads()
+
+    out[row * size + col] = temp
 
 
 jit_mm_practice = jit(_mm_practice)

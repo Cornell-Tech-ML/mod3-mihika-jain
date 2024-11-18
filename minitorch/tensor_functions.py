@@ -195,6 +195,7 @@ class Sum(Function):
     @staticmethod
     def backward(ctx: Context, grad_output: Tensor) -> tuple[Tensor, float]:
         """Compute the gradient of the sum operation."""
+        a_shap, dim = ctx.saved_values
         return grad_output, 0.0
 
 

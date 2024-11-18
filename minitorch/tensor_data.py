@@ -46,8 +46,10 @@ def index_to_position(index: Index, strides: Strides) -> int:
         Position in storage
 
     """
-    return sum(idx * stride for idx, stride in zip(index, strides))
-
+    position = 0 
+    for ind, stride in zip(index, strides):
+        position+= ind * stride
+    return position
 
 def to_index(ordinal: int, shape: Shape, out_index: OutIndex) -> None:
     """Convert an `ordinal` to an index in the `shape`.
@@ -88,7 +90,7 @@ def broadcast_index(
     Returns:
     -------
         None
-
+        
     """
     for i, s in enumerate(shape):
         if s > 1: 
@@ -114,7 +116,6 @@ def shape_broadcast(shape1: UserShape, shape2: UserShape) -> UserShape:
         IndexingError : if cannot broadcast
 
     """
-    
     a, b = shape1, shape2 
     m = max(len(a), len(b))
     c_rev = [0] * m 
