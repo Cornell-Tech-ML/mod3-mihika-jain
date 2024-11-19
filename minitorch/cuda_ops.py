@@ -262,27 +262,34 @@ def _sum_practice(out: Storage, a: Storage, size: int) -> None:
     # Calculate thread and block indices
     tid = cuda.threadIdx.x
     bid = cuda.blockIdx.x
-    
+
     # Global index for loading data
     i = bid * BLOCK_DIM + tid
-    
+
     # Load data into shared memory
     if i < size:
         cache[tid] = a[i]
     else:
-        cache[tid] = 0.0
-    
+        cache[tid] = 0.0  # Buffer for odd numbers
+
     # Ensure all threads have loaded their data
     cuda.syncthreads()
-    
-    # Parallel reduction in shared memory
-    s = BLOCK_DIM // 2
-    while s > 0:
-        if tid < s:
-            cache[tid] += cache[tid + s]
+
+    # Tree-like reduction using mod 2 indexing
+    # This follows the pattern: Round 1 (4 threads), Round 2 (2 threads), Round 3 (1 thread)
+    active = BLOCK_DIM
+    while active > 1:
         cuda.syncthreads()
-        s //= 2
-    
+        if tid < active // 2:
+            # Use mod 2 indexing to determine which elements to combine
+            even_idx = tid * 2
+            odd_idx = tid * 2 + 1
+            if odd_idx < active:  # Check if there's a pair to combine
+                cache[tid] = cache[even_idx] + cache[odd_idx]
+            else:  # If no pair, just copy the even element
+                cache[tid] = cache[even_idx]
+        active //= 2
+
     # Write result for this block to global memory
     if tid == 0:
         out[bid] = cache[0]
@@ -337,15 +344,36 @@ def tensor_reduce(
         reduce_size = a_shape[reduce_dim]
 
         if out_pos < out_size:
+            # Convert output position to index and then to storage position
             to_index(out_pos, out_shape, out_index)
-            o = index_to_position(out_index, out_strides)    
+            o = index_to_position(out_index, out_strides)
+
+            # Load data into shared memory
+            acc = reduce_value
+            for i in range(pos, reduce_size, BLOCK_DIM):
+                out_index[reduce_dim] = i
+                curr_pos = index_to_position(out_index, a_strides)
+                if i < reduce_size:  # Boundary check
+                    cache[pos] = a_storage[curr_pos]
+                else:  # Pad with reduce_value for odd numbers
+                    cache[pos] = reduce_value
+                acc = fn(acc, cache[pos])
+
+            # Synchronize to ensure all data is loaded
+            cuda.syncthreads()
+
+            # Tree-like reduction in shared memory
+            # Each iteration reduces the active threads by half
+            s = BLOCK_DIM // 2
+            while s > 0:
+                if pos < s and pos + s < reduce_size:
+                    cache[pos] = fn(cache[pos], cache[pos + s])
+                cuda.syncthreads()
+                s //= 2
+
+            # Write result using only thread 0
             if pos == 0:
-                acc = reduce_value
-                for s in range(reduce_size):
-                    out_index[reduce_dim] = s
-                    curr_pos = index_to_position(out_index, a_strides)
-                    acc = fn(cache[0], a_storage[curr_pos])
-            out[o] = acc
+                out[o] = cache[0]
 
     return jit(_reduce)  # type: ignore
 
