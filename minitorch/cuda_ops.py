@@ -493,33 +493,32 @@ def _tensor_matrix_multiply(
         # Need to process k_size elements in blocks of BLOCK_DIM
         for block_pos in range(0, k_size, BLOCK_DIM):
             # Load current block into shared memory
-            k = block_pos + pi
-            if k < k_size:
+            if block_pos < k_size:
                 # Load a[i,k] into shared memory
                 a_pos = (
                     batch * a_batch_stride +  # Batch offset
                     i * a_strides[-2] +       # Row offset
-                    k * a_strides[-1]         # Col offset
+                    (block_pos + pj) * a_strides[-1]         # Col offset
                 )
-                a_shared[pj, pi] = a_storage[a_pos]
+                a_shared[pi, pj] = a_storage[a_pos]
 
                 # Load b[k,j] into shared memory
                 b_pos = (
                     batch * b_batch_stride +  # Batch offset
-                    k * b_strides[-2] +       # Row offset
+                    (block_pos + pi) * b_strides[-2] +       # Row offset
                     j * b_strides[-1]         # Col offset
                 )
-                b_shared[pj, pi] = b_storage[b_pos]
+                b_shared[pi, pj] = b_storage[b_pos]
             else:
-                a_shared[pj, pi] = 0
-                b_shared[pj, pi] = 0
+                a_shared[pi, pj] = 0
+                b_shared[pi, pj] = 0
 
             # Ensure all threads have loaded their data
             cuda.syncthreads()
 
             # Compute partial result for this block
             for k in range(min(BLOCK_DIM, k_size - block_pos)):
-                temp += a_shared[pj, k] * b_shared[k, pi]
+                temp += a_shared[pi, k] * b_shared[k, pj]
 
             # Ensure computation is done before next iteration
             cuda.syncthreads()
