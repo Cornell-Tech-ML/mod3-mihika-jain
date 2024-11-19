@@ -402,19 +402,22 @@ def _mm_practice(out: Storage, a: Storage, b: Storage, size: int) -> None:
     tx = cuda.threadIdx.x
     ty = cuda.threadIdx.y
 
-    # Load data into shared memory
     if tx < size and ty < size:
         shared_a[ty, tx] = a[ty * size + tx]
         shared_b[ty, tx] = b[ty * size + tx]
 
-        cuda.syncthreads()
+    # Ensure all threads have loaded their data
+    cuda.syncthreads()
 
-        # start computation for each value in out
+    # Only compute if within bounds
+    if tx < size and ty < size:
+        # Compute output value
         temp = 0.0
-        for i in range(size):
-            temp += shared_a[ty, i] * shared_b[i, tx]
+        for k in range(size):
+            temp += shared_a[ty, k] * shared_b[k, tx]
+        
+        # Write to output
         out[ty * size + tx] = temp
-
 
 jit_mm_practice = jit(_mm_practice)
 
