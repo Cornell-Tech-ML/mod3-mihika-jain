@@ -411,10 +411,8 @@ def _mm_practice(out: Storage, a: Storage, b: Storage, size: int) -> None:
 
         # start computation for each value in out
         temp = 0.0
-        for i in range(BLOCK_DIM):
+        for i in range(size):
             temp += shared_a[ty, i] * shared_b[i, tx]
-        cuda.syncthreads()
-
         out[ty * size + tx] = temp
 
 
