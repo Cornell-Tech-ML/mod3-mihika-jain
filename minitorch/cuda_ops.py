@@ -491,43 +491,44 @@ def _tensor_matrix_multiply(
     temp = 0.0
 
     # Only process if within bounds
-    if i < out_shape[-2] and j < out_shape[-1]:
-        # Need to process k_size elements in blocks of BLOCK_DIM
-        for block_pos in range(0, k_size, BLOCK_DIM):
-            # Load current block into shared memory
-            if block_pos + pj < k_size:
-                # Load a[i,k] into shared memory
-                a_pos = (
-                    batch * a_batch_stride +  # Batch offset
-                    i * a_strides[-2] +       # Row offset
-                    (block_pos + pj) * a_strides[-1]  # Col offset
-                )
-                a_shared[pi, pj] = a_storage[a_pos]
-            else:
-                a_shared[pi, pj] = 0.0
+    # Need to process k_size elements in blocks of BLOCK_DIM
+    for block_pos in range(0, k_size, BLOCK_DIM):
+        # Load current block into shared memory
+        if i < a_shape[-2] and (block_pos + pj) < k_size:
+            # Load a[i,k] into shared memory
+            a_pos = (
+                batch * a_batch_stride +  # Batch offset
+                i * a_strides[-2] +       # Row offset
+                (block_pos + pj) * a_strides[-1]  # Col offset
+            )
+            a_shared[pi, pj] = a_storage[a_pos]
+        else:
+            a_shared[pi, pj] = 0.0
 
-            if block_pos + pi < k_size:
-                # Load b[k,j] into shared memory
-                b_pos = (
-                    batch * b_batch_stride +  # Batch offset
-                    (block_pos + pi) * b_strides[-2] +  # Row offset
-                    j * b_strides[-1]  # Col offset
-                )
-                b_shared[pi, pj] = b_storage[b_pos]
-            else:
-                b_shared[pi, pj] = 0.0
+        if (block_pos + pi) < b_shape[-2] and j < b_shape[-1]:
+            # Load b[k,j] into shared memory
+            b_pos = (
+                batch * b_batch_stride +  # Batch offset
+                (block_pos + pi) * b_strides[-2] +  # Row offset
+                j * b_strides[-1]  # Col offset
+            )
+            b_shared[pi, pj] = b_storage[b_pos]
+        else:
+            b_shared[pi, pj] = 0.0
 
-            # Ensure all threads have loaded their data
-            cuda.syncthreads()
+        # Ensure all threads have loaded their data
+        cuda.syncthreads()
 
-            # Compute partial result for this block
+        # Compute partial result for this block
+        if i < a_shape[-2] and j < b_shape[-1]:
             for k in range(min(BLOCK_DIM, k_size - block_pos)):
                 temp += a_shared[pi, k] * b_shared[k, pj]
 
-            # Ensure computation is done before next iteration
-            cuda.syncthreads()
+        # Ensure computation is done before next iteration
+        cuda.syncthreads()
 
-        # Write final result to output
+    # Write final result to output
+    if i < a_shape[-2] and j < b_shape[-1]:
         out_pos = (
             batch * out_strides[0] +  # Batch offset
             i * out_strides[1] +      # Row offset
