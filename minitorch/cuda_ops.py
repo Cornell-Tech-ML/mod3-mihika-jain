@@ -255,43 +255,31 @@ def _sum_practice(out: Storage, a: Storage, size: int) -> None:
 
     """
     BLOCK_DIM = 32
-    
-    # Shared memory for block reduction
     cache = cuda.shared.array(BLOCK_DIM, numba.float64)
-    
-    # Calculate thread and block indices
-    tid = cuda.threadIdx.x
+    pos = cuda.threadIdx.x
     bid = cuda.blockIdx.x
-
-    # Global index for loading data
-    i = bid * BLOCK_DIM + tid
+    i = bid * BLOCK_DIM + pos
 
     # Load data into shared memory
     if i < size:
-        cache[tid] = a[i]
+        cache[pos] = a[i]
     else:
-        cache[tid] = 0.0  # Buffer for odd numbers
-
-    # Ensure all threads have loaded their data
+        cache[pos] = 0.0  # Buffer for odd numbers
     cuda.syncthreads()
 
-    # Tree-like reduction using mod 2 indexing
-    # This follows the pattern: Round 1 (4 threads), Round 2 (2 threads), Round 3 (1 thread)
     active = BLOCK_DIM
     while active > 0:
-        if tid < active // 2 and i + active // 2 < size:
-            # Use mod 2 indexing to determine which elements to combine
-            even_idx = tid * 2
-            odd_idx = tid * 2 + 1
+        if pos < active // 2 and i + active // 2 < size:
+            even_idx = pos * 2
+            odd_idx = pos * 2 + 1
             if odd_idx < active:  # Check if there's a pair to combine
-                cache[tid] = cache[even_idx] + cache[odd_idx]
+                cache[pos] = cache[even_idx] + cache[odd_idx]
             else:  # If no pair, just copy the even element
-                cache[tid] = cache[even_idx]
+                cache[pos] = cache[even_idx]
         cuda.syncthreads()
         active //= 2
 
-    # Write result for this block to global memory
-    if tid == 0:
+    if pos == 0:
         out[bid] = cache[0]
 
 
@@ -414,20 +402,20 @@ def _mm_practice(out: Storage, a: Storage, b: Storage, size: int) -> None:
     tx = cuda.threadIdx.x
     ty = cuda.threadIdx.y
 
-    row = cuda.blockIdx.y * cuda.blockDim.y + ty
-    col = cuda.blockIdx.x * cuda.blockDim.x + tx
+    # Load data into shared memory
+    if tx < size and ty < size:
+        shared_a[ty, tx] = a[ty * size + tx]
+        shared_b[ty, tx] = b[ty * size + tx]
 
-    temp = 0.0
-
-    for k in range(size):
-        shared_a[ty, tx] = a[row * size + k]
-        shared_b[ty, tx] = b[k * size + col]
-        cuda.syncthreads()
-        for n in range(BLOCK_DIM):
-            temp += shared_a[ty, n] * shared_b[n, tx]
         cuda.syncthreads()
 
-    out[row * size + col] = temp
+        # start computation for each value in out
+        temp = 0.0
+        for i in range(BLOCK_DIM):
+            temp += shared_a[ty, i] * shared_b[i, tx]
+        cuda.syncthreads()
+
+        out[ty * size + tx] = temp
 
 
 jit_mm_practice = jit(_mm_practice)
@@ -495,8 +483,57 @@ def _tensor_matrix_multiply(
     #    a) Copy into shared memory for a matrix.
     #    b) Copy into shared memory for b matrix
     #    c) Compute the dot produce for position c[i, j]
-    # TODO: Implement for Task 3.4.
-    raise NotImplementedError("Need to implement for Task 3.4")
+    
+
+    # Track position in the current block
+    k_size = a_shape[-1]  # Shared dimension size
+
+    # Initialize accumulator
+    temp = 0.0
+
+    # Only process if within bounds
+    if i < out_shape[-2] and j < out_shape[-1]:
+        # Need to process k_size elements in blocks of BLOCK_DIM
+        for block_pos in range(0, k_size, BLOCK_DIM):
+            # Load current block into shared memory
+            k = block_pos + pi
+            if k < k_size:
+                # Load a[i,k] into shared memory
+                a_pos = (
+                    batch * a_batch_stride +  # Batch offset
+                    i * a_strides[-2] +       # Row offset
+                    k * a_strides[-1]         # Col offset
+                )
+                a_shared[pj, pi] = a_storage[a_pos]
+
+                # Load b[k,j] into shared memory
+                b_pos = (
+                    batch * b_batch_stride +  # Batch offset
+                    k * b_strides[-2] +       # Row offset
+                    j * b_strides[-1]         # Col offset
+                )
+                b_shared[pj, pi] = b_storage[b_pos]
+            else:
+                a_shared[pj, pi] = 0
+                b_shared[pj, pi] = 0
+
+            # Ensure all threads have loaded their data
+            cuda.syncthreads()
+
+            # Compute partial result for this block
+            for k in range(min(BLOCK_DIM, k_size - block_pos)):
+                temp += a_shared[pj, k] * b_shared[k, pi]
+
+            # Ensure computation is done before next iteration
+            cuda.syncthreads()
+
+        # Write final result to output
+        out_pos = (
+            batch * out_strides[0] +  # Batch offset
+            i * out_strides[1] +      # Row offset
+            j * out_strides[2]        # Col offset
+        )
+        out[out_pos] = temp
 
 
 tensor_matrix_multiply = jit(_tensor_matrix_multiply)
