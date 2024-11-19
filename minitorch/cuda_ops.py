@@ -278,9 +278,8 @@ def _sum_practice(out: Storage, a: Storage, size: int) -> None:
     # Tree-like reduction using mod 2 indexing
     # This follows the pattern: Round 1 (4 threads), Round 2 (2 threads), Round 3 (1 thread)
     active = BLOCK_DIM
-    while active > 1:
-        cuda.syncthreads()
-        if tid < active // 2:
+    while active > 0:
+        if tid < active // 2 and i + active // 2 < size:
             # Use mod 2 indexing to determine which elements to combine
             even_idx = tid * 2
             odd_idx = tid * 2 + 1
@@ -288,6 +287,7 @@ def _sum_practice(out: Storage, a: Storage, size: int) -> None:
                 cache[tid] = cache[even_idx] + cache[odd_idx]
             else:  # If no pair, just copy the even element
                 cache[tid] = cache[even_idx]
+        cuda.syncthreads()
         active //= 2
 
     # Write result for this block to global memory
@@ -349,7 +349,6 @@ def tensor_reduce(
             o = index_to_position(out_index, out_strides)
 
             # Load data into shared memory
-            acc = reduce_value
             for i in range(pos, reduce_size, BLOCK_DIM):
                 out_index[reduce_dim] = i
                 curr_pos = index_to_position(out_index, a_strides)
@@ -357,7 +356,6 @@ def tensor_reduce(
                     cache[pos] = a_storage[curr_pos]
                 else:  # Pad with reduce_value for odd numbers
                     cache[pos] = reduce_value
-                acc = fn(acc, cache[pos])
 
             # Synchronize to ensure all data is loaded
             cuda.syncthreads()
