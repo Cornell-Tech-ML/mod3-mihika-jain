@@ -233,11 +233,12 @@ class IsClose(Function):
         """Element-wise check if two tensors are close."""
         return a.f.is_close_zip(a, b)
 
+
 class Permute(Function):
     @staticmethod
     def forward(ctx: Context, a: Tensor, order: Tensor) -> Tensor:
         """Permute the dimensions of the tensor according to the specified order."""
-        ctx.save_for_backward(order) 
+        ctx.save_for_backward(order)
         return a._new(a._tensor.permute(*[int(order[i]) for i in range(order.size)]))
 
     @staticmethod

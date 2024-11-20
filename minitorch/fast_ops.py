@@ -30,6 +30,18 @@ Fn = TypeVar("Fn")
 
 
 def njit(fn: Fn, **kwargs: Any) -> Fn:
+    """Just-in-time compile a function using Numba with inline always.
+
+    Args:
+    ----
+        fn: The function to be compiled.
+        **kwargs: Additional keyword arguments for Numba's njit.
+
+    Returns:
+    -------
+        The JIT compiled function.
+
+    """
     return _njit(inline="always", **kwargs)(fn)  # type: ignore
 
 
@@ -168,7 +180,9 @@ def tensor_map(
         in_shape: Shape,
         in_strides: Strides,
     ) -> None:
-        if np.array_equal(out_shape, in_shape) and np.array_equal(out_strides, in_strides):
+        if np.array_equal(out_shape, in_shape) and np.array_equal(
+            out_strides, in_strides
+        ):
             for i in prange(len(out)):
                 out[i] = fn(in_storage[i])
         else:
@@ -180,6 +194,7 @@ def tensor_map(
                 in_position = index_to_position(in_index, in_strides)
                 out_position = index_to_position(out_index, out_strides)
                 out[out_position] = fn(in_storage[in_position])
+
     return njit(_map, parallel=True)  # type: ignore
 
 
@@ -334,8 +349,8 @@ def _tensor_matrix_multiply(
 
     a_batch_stride = a_strides[0] if a_shape[0] > 1 else 0
     b_batch_stride = b_strides[0] if b_shape[0] > 1 else 0
-    
-    m, k = a_shape[-2], a_shape[-1] 
+
+    m, k = a_shape[-2], a_shape[-1]
     n = b_shape[-1]
 
     for i in prange(len(out)):
@@ -345,11 +360,16 @@ def _tensor_matrix_multiply(
 
         sum = 0.0
         for j in range(k):
-            a = a_storage[batch * a_batch_stride + r * a_strides[-2] + j * a_strides[-1]]
-            b = b_storage[batch * b_batch_stride + j * b_strides[-2] + c * b_strides[-1]]
+            a = a_storage[
+                batch * a_batch_stride + r * a_strides[-2] + j * a_strides[-1]
+            ]
+            b = b_storage[
+                batch * b_batch_stride + j * b_strides[-2] + c * b_strides[-1]
+            ]
             sum += a * b
 
         out[i] = sum
-                
+
+
 tensor_matrix_multiply = njit(_tensor_matrix_multiply, parallel=True)
 assert tensor_matrix_multiply is not None

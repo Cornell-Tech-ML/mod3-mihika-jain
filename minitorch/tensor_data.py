@@ -46,10 +46,11 @@ def index_to_position(index: Index, strides: Strides) -> int:
         Position in storage
 
     """
-    position = 0 
+    position = 0
     for ind, stride in zip(index, strides):
-        position+= ind * stride
+        position += ind * stride
     return position
+
 
 def to_index(ordinal: int, shape: Shape, out_index: OutIndex) -> None:
     """Convert an `ordinal` to an index in the `shape`.
@@ -90,14 +91,15 @@ def broadcast_index(
     Returns:
     -------
         None
-        
+
     """
     for i, s in enumerate(shape):
-        if s > 1: 
+        if s > 1:
             out_index[i] = big_index[i + (len(big_shape) - len(shape))]
-        else: 
+        else:
             out_index[i] = 0
     return None
+
 
 def shape_broadcast(shape1: UserShape, shape2: UserShape) -> UserShape:
     """Broadcast two shapes to create a new union shape.
@@ -116,9 +118,9 @@ def shape_broadcast(shape1: UserShape, shape2: UserShape) -> UserShape:
         IndexingError : if cannot broadcast
 
     """
-    a, b = shape1, shape2 
+    a, b = shape1, shape2
     m = max(len(a), len(b))
-    c_rev = [0] * m 
+    c_rev = [0] * m
     a_rev = list(reversed(a))
     b_rev = list(reversed(b))
     for i in range(m):
@@ -126,7 +128,7 @@ def shape_broadcast(shape1: UserShape, shape2: UserShape) -> UserShape:
             c_rev[i] = b_rev[i]
         elif i >= len(b):
             c_rev[i] = a_rev[i]
-        else: 
+        else:
             c_rev[i] = max(a_rev[i], b_rev[i])
             if a_rev[i] != c_rev[i] and a_rev[i] != 1:
                 raise IndexingError(f"Cannot broadcast {a} and {b}")
@@ -310,7 +312,7 @@ class TensorData:
         ), f"Must give a position to each dimension. Shape: {self.shape} Order: {order}"
 
         return TensorData(
-            self._storage, 
+            self._storage,
             tuple([self.shape[o] for o in order]),
             tuple([self._strides[o] for o in order]),
         )
