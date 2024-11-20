@@ -328,11 +328,10 @@ def tensor_reduce(
         cache = cuda.shared.array(BLOCK_DIM, numba.float64)
         out_index = cuda.local.array(MAX_DIMS, numba.int32)
         out_pos = cuda.blockIdx.x
-        pos = cuda.threadIdx.x # thread position in block 
+        pos = cuda.threadIdx.x
         reduce_size = a_shape[reduce_dim]
 
         if out_pos < out_size:
-            # Convert output position to index and then to storage position
             to_index(out_pos, out_shape, out_index)
             o = index_to_position(out_index, out_strides)
 
@@ -340,15 +339,13 @@ def tensor_reduce(
             for i in range(pos, reduce_size, BLOCK_DIM):
                 out_index[reduce_dim] = i
                 curr_pos = index_to_position(out_index, a_strides)
-                if i < reduce_size:  # Boundary check
+                if i < reduce_size: 
                     cache[pos] = a_storage[curr_pos]
                 else:  # Pad with reduce_value for odd numbers
                     cache[pos] = reduce_value
 
-            # Synchronize to ensure all data is loaded
             cuda.syncthreads()
 
-            # Tree-like reduction in shared memory
             # Each iteration reduces the active threads by half
             s = BLOCK_DIM // 2
             while s > 0:
@@ -357,7 +354,6 @@ def tensor_reduce(
                 cuda.syncthreads()
                 s //= 2
 
-            # Write result using only thread 0
             if pos == 0:
                 out[o] = cache[0]
 
@@ -477,25 +473,14 @@ def _tensor_matrix_multiply(
     pi = cuda.threadIdx.x
     pj = cuda.threadIdx.y
 
-    # Code Plan:
-    # 1) Move across shared dimension by block dim.
-    #    a) Copy into shared memory for a matrix.
-    #    b) Copy into shared memory for b matrix
-    #    c) Compute the dot produce for position c[i, j]
-    
+    k_size = a_shape[-1]
 
-    # Track position in the current block
-    k_size = a_shape[-1]  # Shared dimension size
-
-    # Initialize accumulator
     temp = 0.0
 
-    # Only process if within bounds
     # Need to process k_size elements in blocks of BLOCK_DIM
     for block_pos in range(0, k_size, BLOCK_DIM):
         # Load current block into shared memory
         if i < a_shape[-2] and (block_pos + pj) < k_size:
-            # Load a[i,k] into shared memory
             a_pos = (
                 batch * a_batch_stride +  # Batch offset
                 i * a_strides[-2] +       # Row offset
@@ -506,7 +491,6 @@ def _tensor_matrix_multiply(
             a_shared[pi, pj] = 0.0
 
         if (block_pos + pi) < b_shape[-2] and j < b_shape[-1]:
-            # Load b[k,j] into shared memory
             b_pos = (
                 batch * b_batch_stride +  # Batch offset
                 (block_pos + pi) * b_strides[-2] +  # Row offset
@@ -516,23 +500,19 @@ def _tensor_matrix_multiply(
         else:
             b_shared[pi, pj] = 0.0
 
-        # Ensure all threads have loaded their data
         cuda.syncthreads()
 
-        # Compute partial result for this block
         if i < a_shape[-2] and j < b_shape[-1]:
             for k in range(min(BLOCK_DIM, k_size - block_pos)):
                 temp += a_shared[pi, k] * b_shared[k, pj]
 
-        # Ensure computation is done before next iteration
         cuda.syncthreads()
 
-    # Write final result to output
     if i < a_shape[-2] and j < b_shape[-1]:
         out_pos = (
-            batch * out_strides[0] +  # Batch offset
-            i * out_strides[1] +      # Row offset
-            j * out_strides[2]        # Col offset
+            batch * out_strides[0] +  
+            i * out_strides[1] +     
+            j * out_strides[2] 
         )
         out[out_pos] = temp
 

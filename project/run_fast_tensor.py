@@ -44,12 +44,10 @@ class Linear(minitorch.Module):
         self.out_size = out_size
 
     def forward(self, x):
-        size, feats = x.shape
-        output_dim = self.weights.value.shape[1]
-        reshaped_x = x.view(size, feats, 1)
-        reshaped_weights = self.weights.value.view(1, feats, output_dim)
         bias_term = self.bias.value
-        return (reshaped_x * reshaped_weights).sum(dim=1).view(size, output_dim) + bias_term
+        result = x @ self.weights.value
+        return result + bias_term
+
 
 
 class FastTrain:
